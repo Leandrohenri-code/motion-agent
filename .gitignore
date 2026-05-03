@@ -1,0 +1,110 @@
+# ── Dependencias Node ─────────────────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+
+# ── Build / output ────────────────────────────────────────────────────────────
+dist/
+dist-electron/
+build/
+out/
+.vite/
+release/
+
+# ── Instaladores gerados ───────────────────────────────────────────────────────
+*.exe
+*.dmg
+*.AppImage
+*.deb
+*.rpm
+*.snap
+*.msi
+*.pkg
+*.blockmap
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+*.whl
+
+# ── Variaveis de ambiente ─────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+.env.staging
+!.env.example
+
+# ── Segredos / chaves ─────────────────────────────────────────────────────────
+*.pem
+*.key
+*.p8
+*.p12
+secrets/
+*.secret
+.keys.json
+config.json
+
+# ── Dados locais do usuario (gerados em runtime) ──────────────────────────────
+# Estes arquivos ficam em %USERPROFILE%\.motion-agent\ e nunca entram no repo
+# Veja README para entender onde as configuracoes sao salvas
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ── Cache ─────────────────────────────────────────────────────────────────────
+.cache/
+.eslintcache
+.parcelcache
+*.tsbuildinfo
+
+# ── Temporarios de processamento de video e audio ────────────────────────────
+*.tmp
+*.temp
+.motion_agent_frames/
+agent/.motion_agent_frames/
+*.wav
+*.mp3
+*.mp4
+*.webm
+!assets/**/*.mp4
+!assets/**/*.webm
+
+# ── Editores / OS ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/settings.json
+.vscode/launch.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ── Atalhos Windows ───────────────────────────────────────────────────────────
+*.lnk
+
+# ── Testes ────────────────────────────────────────────────────────────────────
+coverage/
+.nyc_output/
+
+# ── Electron builder ─────────────────────────────────────────────────────────
+builder-debug.yml
+builder-effective-config.yaml

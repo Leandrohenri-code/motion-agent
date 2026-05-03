@@ -1,0 +1,26 @@
+appId: com.motionagent.app
+productName: Motion Agent
+directories:
+  output: dist-electron
+win:
+  target: nsis
+  icon: assets/icon.ico
+mac:
+  target: dmg
+  icon: assets/icon.icns
+linux:
+  target: AppImage
+  icon: assets/icon.png
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+files:
+  - electron/**/*
+  - dist/**/*
+  - agent/**/*
+  - package.json
+extraResources:
+  - from: agent/
+    to: agent/
+    filter:
+      - "**/*.py"

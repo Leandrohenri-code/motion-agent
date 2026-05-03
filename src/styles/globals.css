@@ -1,0 +1,172 @@
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap');
+
+/* ─── CSS Variables ─── */
+:root {
+  --bg-main: #0d0d0f;
+  --surface-1: #141416;
+  --surface-2: #1a1a1e;
+  --surface-3: #1f1f26;
+  --accent: #6c63ff;
+  --accent-teal: #00d4aa;
+  --accent-glow: #6c63ff26;
+  --accent-teal-glow: #00d4aa20;
+  --text-primary: #f0f0f2;
+  --text-secondary: #8a8a9a;
+  --text-disabled: #44444e;
+  --border: #22222c;
+  --border-hover: #33333f;
+  --success: #00d4aa;
+  --error: #ff4d6d;
+  --warning: #ffb340;
+  --info: #4d9fff;
+  --font-ui: 'Geist', 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'Geist Mono', 'JetBrains Mono', monospace;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-lg: 16px;
+  --transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ─── Reset ─── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--bg-main);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+}
+
+/* ─── Scrollbars ─── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2a2a36; border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: #3a3a48; }
+
+/* ─── Typography helpers ─── */
+.text-xs   { font-size: 11px; }
+.text-sm   { font-size: 12px; }
+.text-base { font-size: 14px; }
+.text-md   { font-size: 16px; }
+.text-lg   { font-size: 20px; }
+.text-xl   { font-size: 28px; }
+
+.font-light    { font-weight: 300; }
+.font-regular  { font-weight: 400; }
+.font-medium   { font-weight: 500; }
+.font-semibold { font-weight: 600; }
+
+.text-primary   { color: var(--text-primary); }
+.text-secondary { color: var(--text-secondary); }
+.text-disabled  { color: var(--text-disabled); }
+.text-accent    { color: var(--accent); }
+.text-teal      { color: var(--accent-teal); }
+.text-error     { color: var(--error); }
+.text-warning   { color: var(--warning); }
+.text-mono      { font-family: var(--font-mono); }
+
+/* ─── Keyframes ─── */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes slideUp {
+  from { transform: translateY(8px); opacity: 0; }
+  to   { transform: translateY(0);   opacity: 1; }
+}
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to   { background-position:  200% 0; }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 8px #6c63ff40; }
+  50%       { box-shadow: 0 0 20px #6c63ff80; }
+}
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 0 0 #6c63ff40; }
+  50%       { box-shadow: 0 0 0 4px #6c63ff30; }
+}
+@keyframes dotPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%       { transform: scale(1.4); opacity: 0.6; }
+}
+
+/* ─── Skeleton ─── */
+.skeleton {
+  background: linear-gradient(90deg, #1a1a1e 25%, #22222c 50%, #1a1a1e 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-sm);
+}
+
+/* ─── Dividers ─── */
+.divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 24px 0;
+}
+
+.divider-label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 24px 0;
+  color: var(--text-disabled);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.divider-label::before,
+.divider-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ─── Focus visible ─── */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ─── Utility ─── */
+.truncate {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fade-in  { animation: fadeIn 0.2s ease; }
+.slide-up { animation: slideUp 0.2s ease; }
+
+input, textarea, select {
+  font-family: var(--font-ui);
+}
+
+select option {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
