@@ -5,6 +5,8 @@ directories:
 win:
   target: nsis
   icon: assets/icon.ico
+  signAndEditExecutable: false
+  signingHashAlgorithms: []
 mac:
   target: dmg
   icon: assets/icon.icns

@@ -4,7 +4,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // File system
   browseFolder: () => ipcRenderer.invoke('fs:browseFolder'),
   browseFile: (filters) => ipcRenderer.invoke('fs:browseFile', filters),
+  browseFiles: (opts) => ipcRenderer.invoke('fs:browseFiles', opts),
   readFile: (filePath) => ipcRenderer.invoke('fs:readFile', filePath),
+  readFileBase64: (filePath) => ipcRenderer.invoke('fs:readFileBase64', filePath),
   writeFile: (filePath, content) => ipcRenderer.invoke('fs:writeFile', filePath, content),
   fileExists: (filePath) => ipcRenderer.invoke('fs:fileExists', filePath),
   openFolder: (folderPath) => ipcRenderer.invoke('fs:openFolder', folderPath),
@@ -39,6 +41,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Remotion
   detectRemotion: (folderPath) => ipcRenderer.invoke('remotion:detect', folderPath),
   openRemotionStudio: (folderPath) => ipcRenderer.invoke('remotion:openStudio', folderPath),
+  startRemotionStudio: (folderPath) => ipcRenderer.invoke('remotion:startStudio', folderPath),
+  checkRemotionServer: () => ipcRenderer.invoke('remotion:checkServer'),
 
   // Platform
   platform: process.platform,

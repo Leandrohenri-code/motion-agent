@@ -1,8 +1,8 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Trash2, Download, ChevronUp, ChevronDown } from 'lucide-react';
+import { Trash2, Download, ChevronUp, ChevronDown, CheckCircle, XCircle, RefreshCw, Eye } from 'lucide-react';
 
 const levelColors = {
   info:    '#f0f0f2',
@@ -11,6 +11,119 @@ const levelColors = {
   error:   '#ff4d6d',
   success: '#00d4aa',
 };
+
+// ── Painel de Aprovação de Cena ─────────────────────────────────────────────
+function ApprovalPanel({ sceneNum }) {
+  const { approveScene, rejectScene, retryScene, agent } = useAppStore();
+  const [feedback, setFeedback] = useState('');
+  const [showFeedback, setShowFeedback] = useState(false);
+  const generatedCode = agent.generatedCode;
+
+  return (
+    <div style={{
+      background: 'linear-gradient(135deg, #6c63ff18, #00d4aa10)',
+      border: '1px solid #6c63ff40',
+      borderRadius: 0,
+      padding: '12px 16px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10,
+      flexShrink: 0,
+    }}>
+      {/* Título */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Eye size={14} style={{ color: '#6c63ff' }} />
+        <span style={{ fontSize: 13, fontWeight: 700, color: '#f0f0f2' }}>
+          Cena {sceneNum} pronta — revise e decida
+        </span>
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: '#8a8a9a' }}>
+          Modo passo a passo ativo
+        </span>
+      </div>
+
+      {/* Campo de feedback */}
+      {showFeedback && (
+        <textarea
+          autoFocus
+          placeholder="Descreva o que mudar nesta cena (opcional)..."
+          value={feedback}
+          onChange={(e) => setFeedback(e.target.value)}
+          style={{
+            background: '#0d0d0f',
+            border: '1px solid #22222c',
+            borderRadius: 6,
+            color: '#f0f0f2',
+            fontSize: 12,
+            padding: '8px 10px',
+            resize: 'none',
+            minHeight: 60,
+            fontFamily: 'inherit',
+            outline: 'none',
+          }}
+        />
+      )}
+
+      {/* Botões */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {/* Aprovar */}
+        <button
+          onClick={() => approveScene(sceneNum)}
+          style={{
+            flex: 1, minWidth: 120,
+            padding: '10px 16px',
+            borderRadius: 8, border: 'none', cursor: 'pointer',
+            background: 'linear-gradient(135deg, #00d4aa, #00b896)',
+            color: '#0d0d0f',
+            fontSize: 13, fontWeight: 700,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            boxShadow: '0 2px 12px #00d4aa40',
+          }}
+        >
+          <CheckCircle size={15} /> Aprovar e continuar
+        </button>
+
+        {/* Rejeitar com feedback */}
+        <button
+          onClick={() => {
+            if (!showFeedback) { setShowFeedback(true); return; }
+            rejectScene(sceneNum, feedback);
+            setFeedback('');
+            setShowFeedback(false);
+          }}
+          style={{
+            flex: 1, minWidth: 120,
+            padding: '10px 16px',
+            borderRadius: 8, border: 'none', cursor: 'pointer',
+            background: showFeedback ? '#ff4d6d' : '#ff4d6d20',
+            outline: '1px solid #ff4d6d40',
+            color: showFeedback ? '#fff' : '#ff4d6d',
+            fontSize: 13, fontWeight: 600,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          }}
+        >
+          <XCircle size={15} />
+          {showFeedback ? 'Enviar feedback e regenerar' : 'Rejeitar e dar feedback'}
+        </button>
+
+        {/* Retry silencioso */}
+        <button
+          onClick={() => retryScene(sceneNum)}
+          style={{
+            padding: '10px 14px',
+            borderRadius: 8, border: '1px solid #44444e', cursor: 'pointer',
+            background: 'transparent',
+            color: '#8a8a9a',
+            fontSize: 12, fontWeight: 500,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+          }}
+          title="Regenerar sem feedback"
+        >
+          <RefreshCw size={13} /> Regenerar
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export function LogTerminal() {
   const { agent, logPanelOpen, logPanelHeight, logActiveTab, setLogPanelOpen, setLogPanelHeight, setLogActiveTab, clearLogs, clearErrors } = useAppStore();
@@ -161,6 +274,11 @@ export function LogTerminal() {
           {logPanelOpen ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
         </button>
       </div>
+
+      {/* Painel de aprovação — aparece quando aguardando, independente do painel estar aberto */}
+      {agent.awaitingApproval && agent.awaitingScene && (
+        <ApprovalPanel sceneNum={agent.awaitingScene} />
+      )}
 
       {/* Content */}
       {logPanelOpen && (

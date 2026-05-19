@@ -14,6 +14,7 @@ const DEFAULT_PROJECT = {
   coherenceCheck: true,
   openFolderOnDone: false,
   remotionDetected: false,
+  lockedReferenceMode: false,
 };
 
 const DEFAULT_SCRIPT = {
@@ -49,6 +50,7 @@ const DEFAULT_REFERENCE = {
   analysis: null,
   isAnalyzing: false,
   analyzeStep: '',
+  analyzeError: '',
 };
 
 const DEFAULT_API = {
@@ -166,6 +168,93 @@ export const useAppStore = create((set, get) => ({
 
   setModels: (models) =>
     set((s) => ({ api: { ...s.api, models, isLoadingModels: false, modelError: '' } })),
+
+  // ── Generation ──
+  startGeneration: async () => {
+    const { project, frames, script, api, updateAgent, addLog } = get();
+
+    const apiKey = await window.electronAPI?.loadApiKey(api.provider).catch(() => null) || api.apiKey;
+
+    const config = {
+      project: {
+        remotion_path: project.remotionPath,
+        output_path: project.outputPath,
+        resolution: project.resolution,
+        fps: project.fps,
+        format: project.format,
+        step_by_step: project.stepByStep,
+        verbose_log: project.verboseLog,
+        coherence_check: project.coherenceCheck,
+        open_folder_on_done: project.openFolderOnDone,
+        locked_reference_mode: project.lockedReferenceMode,
+      },
+      frames: frames.map((f) => ({
+        id: f.id,
+        name: f.name,
+        media_type: f.mediaType || 'image',
+        preview: f.preview || null,
+        description: f.description,
+        duration: parseFloat(f.duration) || 3,
+      })),
+      script: {
+        execution_prompt: script.executionPrompt,
+        style: script.styleChips,
+        audio: {
+          enabled: script.audio.enabled,
+          uploaded_path: script.audio.uploadedPath || null,
+          tts_text: script.audio.ttsText || null,
+          tts_provider: script.audio.ttsProvider,
+          tts_voice: script.audio.ttsVoice,
+        },
+      },
+      api: {
+        provider: api.provider,
+        api_key: apiKey,
+        base_url: api.baseUrl || null,
+        model: api.selectedModel,
+        vision_model: api.visionModel || api.selectedModel,
+        temperature: api.temperature,
+        max_tokens: api.maxTokens,
+        system_prompt: api.systemPrompt,
+        timeout: api.timeout,
+        streaming: api.streaming,
+      },
+      reference: {
+        preview: get().reference?.preview || null,
+        manualDescription: get().reference?.manualDescription || '',
+        analysis: get().reference?.analysis || '',
+      },
+    };
+
+    updateAgent({ isRunning: true, status: 'running', currentScene: 0, totalScenes: frames.length, logs: [], errors: [], outputPath: '' });
+    addLog({ level: 'info', message: `▶ Iniciando geração — ${frames.length} cena(s) · modelo: ${api.selectedModel || api.provider}` });
+
+    window.electronAPI?.startAgent(config);
+  },
+
+  stopGeneration: () => {
+    window.electronAPI?.stopAgent();
+    get().updateAgent({ isRunning: false, status: 'idle' });
+    get().addLog({ level: 'warn', message: '⏹ Geração interrompida pelo usuário' });
+  },
+
+  approveScene: (sceneNum) => {
+    window.electronAPI?.sendAgentMessage({ type: 'approve_scene', scene: sceneNum });
+    get().updateAgent({ awaitingApproval: false, awaitingScene: null, status: 'running' });
+    get().addLog({ level: 'success', message: `✅ Cena ${sceneNum} aprovada — continuando...` });
+  },
+
+  rejectScene: (sceneNum, feedback) => {
+    window.electronAPI?.sendAgentMessage({ type: 'reject_scene', scene: sceneNum, feedback: feedback || '' });
+    get().updateAgent({ awaitingApproval: false, awaitingScene: null, status: 'running' });
+    get().addLog({ level: 'warn', message: `🔄 Cena ${sceneNum} rejeitada — regenerando${feedback ? ` com feedback: "${feedback}"` : ''}...` });
+  },
+
+  retryScene: (sceneNum) => {
+    window.electronAPI?.sendAgentMessage({ type: 'retry_scene', scene: sceneNum });
+    get().updateAgent({ awaitingApproval: false, awaitingScene: null, status: 'running' });
+    get().addLog({ level: 'info', message: `🔄 Cena ${sceneNum} sendo regenerada...` });
+  },
 
   // ── Agent ──
   updateAgent: (patch) =>

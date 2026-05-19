@@ -22,6 +22,41 @@ module.exports = function registerFileSystemHandlers(ipcMain, dialog, shell, fs,
     return result.canceled ? null : result.filePaths[0];
   });
 
+  // Multi-select nativo para imagens/vídeos
+  ipcMain.handle('fs:browseFiles', async (event, opts) => {
+    const { type = 'images' } = opts || {};
+    const imageFilters = [
+      { name: 'Imagens', extensions: ['jpg','jpeg','png','webp','gif','tiff','tif','bmp','avif','heic','heif','svg'] },
+    ];
+    const videoFilters = [
+      { name: 'Vídeos', extensions: ['mp4','mov','avi','webm','mkv','m4v','wmv','flv'] },
+    ];
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile', 'multiSelections'],
+      filters: type === 'videos' ? videoFilters : imageFilters,
+    });
+    return result.canceled ? [] : result.filePaths;
+  });
+
+  // Lê arquivo e retorna base64 data URL (com resize opcional via canvas no renderer)
+  ipcMain.handle('fs:readFileBase64', async (event, filePath) => {
+    try {
+      const data = fs.readFileSync(filePath);
+      const ext = path.extname(filePath).toLowerCase().replace('.', '');
+      const mimeMap = {
+        jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+        webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp',
+        tiff: 'image/tiff', tif: 'image/tiff', svg: 'image/svg+xml',
+        avif: 'image/avif', heic: 'image/heic', heif: 'image/heif',
+        mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm',
+      };
+      const mime = mimeMap[ext] || 'application/octet-stream';
+      return `data:${mime};base64,${data.toString('base64')}`;
+    } catch (e) {
+      return null;
+    }
+  });
+
   ipcMain.handle('fs:readFile', async (event, filePath) => {
     try {
       return fs.readFileSync(filePath, 'utf-8');
@@ -129,12 +164,43 @@ module.exports = function registerFileSystemHandlers(ipcMain, dialog, shell, fs,
 
   ipcMain.handle('remotion:openStudio', async (event, folderPath) => {
     const { spawn } = require('child_process');
-    spawn('npx', ['remotion', 'studio'], {
+    spawn('npx', ['remotion', 'studio', '--no-open', '--port', '3333'], {
       cwd: folderPath,
       shell: true,
       detached: true,
       stdio: 'ignore',
     }).unref();
-    setTimeout(() => shell.openExternal('http://localhost:3000'), 3000);
+    setTimeout(() => shell.openExternal('http://localhost:3333'), 3000);
+  });
+
+  // Inicia Remotion studio em background (sem abrir browser)
+  let remotionStudioProcess = null;
+  ipcMain.handle('remotion:startStudio', async (event, folderPath) => {
+    if (remotionStudioProcess) {
+      try { remotionStudioProcess.kill(); } catch {}
+      remotionStudioProcess = null;
+    }
+    if (!folderPath) return { started: false, error: 'No path' };
+    const { spawn } = require('child_process');
+    remotionStudioProcess = spawn('npx', ['remotion', 'studio', '--no-open', '--port', '3333'], {
+      cwd: folderPath,
+      shell: true,
+      detached: false,
+      stdio: 'pipe',
+    });
+    return { started: true };
+  });
+
+  // Checa se o servidor Remotion está rodando
+  ipcMain.handle('remotion:checkServer', async () => {
+    const http = require('http');
+    return new Promise((resolve) => {
+      const req = http.get('http://localhost:3333', (res) => {
+        resolve({ online: true, status: res.statusCode });
+      });
+      req.on('error', () => resolve({ online: false }));
+      req.setTimeout(1500, () => { req.destroy(); resolve({ online: false }); });
+    });
   });
 };
+

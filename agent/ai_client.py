@@ -1,21 +1,10 @@
 """
 Cliente universal de IA com suporte a qualquer provider registrado.
-
-Abstrai as diferencas entre SDKs e APIs de forma que o resto do agente
-sempre chame apenas client.complete() ou client.stream(), independente
-do provider escolhido pelo usuario.
-
-Providers suportados e seus SDKs:
-  - openai_compat  : OpenAI, Mistral, Groq, Together, DeepSeek, xAI, OpenRouter,
-                     HuggingFace, Fireworks, Anyscale, LM Studio, Azure OpenAI
-                     (todos usam o mesmo formato de API OpenAI-compatible)
-  - anthropic      : Claude via SDK oficial anthropic-python
-  - google         : Gemini via SDK google-generativeai
-  - ollama         : Modelos locais via API Ollama (formato proprio)
 """
 
 import time
 import json
+import httpx
 from typing import Iterator, Optional
 from provider_registry import get_provider, PROVIDERS
 
@@ -36,13 +25,6 @@ class AIClient:
         self.base_url = base_url or self.provider["base_url"]
 
     def _build_messages(self, prompt: str, images: list = None) -> list:
-        """
-        Constroi a lista de mensagens no formato OpenAI (multimodal quando ha imagens).
-
-        Quando ha imagens, cada uma e inserida como image_url antes do texto,
-        seguindo o formato de content array do OpenAI Vision.
-        O system prompt e injetado como primeira mensagem quando presente.
-        """
         messages = []
         if self.system_prompt:
             messages.append({"role": "system", "content": self.system_prompt})
@@ -58,10 +40,6 @@ class AIClient:
         return messages
 
     def complete(self, prompt: str, images: list = None) -> str:
-        """
-        Completion sem streaming. Retorna o texto completo da resposta.
-        Tenta ate 3 vezes com backoff exponencial antes de lancar excecao.
-        """
         sdk = self.provider.get("sdk", "openai_compat")
         for attempt in range(3):
             try:
@@ -74,14 +52,19 @@ class AIClient:
                 else:
                     return self._complete_openai_compat(prompt, images)
             except Exception as e:
+                err = str(e)
+                # Não retentar erros de cliente (4xx), exceto 429 (rate limit)
+                if "400" in err or "401" in err or "403" in err or "404" in err:
+                    raise   # falha imediata — não adianta retentar
                 if attempt == 2:
                     raise
-                time.sleep(2 ** attempt)
+                if "429" in err:
+                    # Rate limit — espera mais antes de retentar
+                    time.sleep(20 * (attempt + 1))
+                else:
+                    time.sleep(2 ** attempt)
 
     def stream(self, prompt: str, images: list = None) -> Iterator[str]:
-        """
-        Streaming completion. Itera sobre chunks de texto conforme chegam.
-        """
         sdk = self.provider.get("sdk", "openai_compat")
         if sdk == "anthropic":
             yield from self._stream_anthropic(prompt, images)
@@ -90,27 +73,232 @@ class AIClient:
         else:
             yield from self._stream_openai_compat(prompt, images)
 
-    # ── Implementacoes por provider ──────────────────────────────────────────
-    # Logica de negocio omitida intencionalmente — produto comercial ativo
-    # Business logic omitted — see live demo
+    # ── OpenAI-compatible ────────────────────────────────────────────────────
 
     def _complete_openai_compat(self, prompt: str, images: list = None) -> str:
-        raise NotImplementedError
+        messages = self._build_messages(prompt, images)
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        # OpenRouter extra headers
+        if self.provider_id == "openrouter":
+            headers["HTTP-Referer"] = "https://motion-agent.app"
+            headers["X-Title"] = "Motion Agent"
+
+        url = f"{self.base_url}/chat/completions"
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+            return data["choices"][0]["message"]["content"]
 
     def _stream_openai_compat(self, prompt: str, images: list = None) -> Iterator[str]:
-        raise NotImplementedError
+        messages = self._build_messages(prompt, images)
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "stream": True,
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        if self.provider_id == "openrouter":
+            headers["HTTP-Referer"] = "https://motion-agent.app"
+            headers["X-Title"] = "Motion Agent"
+
+        url = f"{self.base_url}/chat/completions"
+        with httpx.Client(timeout=self.timeout) as client:
+            with client.stream("POST", url, json=payload, headers=headers) as resp:
+                resp.raise_for_status()
+                for line in resp.iter_lines():
+                    if not line or line == "data: [DONE]":
+                        continue
+                    if line.startswith("data: "):
+                        try:
+                            chunk = json.loads(line[6:])
+                            delta = chunk["choices"][0].get("delta", {})
+                            text = delta.get("content", "")
+                            if text:
+                                yield text
+                        except Exception:
+                            continue
+
+    # ── Anthropic ────────────────────────────────────────────────────────────
 
     def _complete_anthropic(self, prompt: str, images: list = None) -> str:
-        raise NotImplementedError
+        content = []
+        if images:
+            for img in images:
+                if img.startswith("data:"):
+                    mime = img.split(";")[0].split(":")[1]
+                    data = img.split(",")[1]
+                    content.append({
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": mime, "data": data}
+                    })
+                else:
+                    content.append({
+                        "type": "image",
+                        "source": {"type": "url", "url": img}
+                    })
+        content.append({"type": "text", "text": prompt})
+
+        payload = {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "messages": [{"role": "user", "content": content}],
+        }
+        if self.system_prompt:
+            payload["system"] = self.system_prompt
+
+        headers = {
+            "x-api-key": self.api_key,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+        }
+        url = "https://api.anthropic.com/v1/messages"
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+            return data["content"][0]["text"]
 
     def _stream_anthropic(self, prompt: str, images: list = None) -> Iterator[str]:
-        raise NotImplementedError
+        content = []
+        if images:
+            for img in images:
+                if img.startswith("data:"):
+                    mime = img.split(";")[0].split(":")[1]
+                    data = img.split(",")[1]
+                    content.append({
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": mime, "data": data}
+                    })
+        content.append({"type": "text", "text": prompt})
+
+        payload = {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "messages": [{"role": "user", "content": content}],
+            "stream": True,
+        }
+        if self.system_prompt:
+            payload["system"] = self.system_prompt
+
+        headers = {
+            "x-api-key": self.api_key,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+        }
+        url = "https://api.anthropic.com/v1/messages"
+        with httpx.Client(timeout=self.timeout) as client:
+            with client.stream("POST", url, json=payload, headers=headers) as resp:
+                resp.raise_for_status()
+                for line in resp.iter_lines():
+                    if not line or not line.startswith("data: "):
+                        continue
+                    try:
+                        event = json.loads(line[6:])
+                        if event.get("type") == "content_block_delta":
+                            text = event.get("delta", {}).get("text", "")
+                            if text:
+                                yield text
+                    except Exception:
+                        continue
+
+    # ── Google Gemini ────────────────────────────────────────────────────────
 
     def _complete_google(self, prompt: str, images: list = None) -> str:
-        raise NotImplementedError
+        parts = []
+        if images:
+            for img in images:
+                if img.startswith("data:"):
+                    mime = img.split(";")[0].split(":")[1]
+                    data = img.split(",")[1]
+                    parts.append({"inlineData": {"mimeType": mime, "data": data}})
+        parts.append({"text": prompt})
+
+        contents = [{"parts": parts}]
+        if self.system_prompt:
+            contents = [{"role": "user", "parts": [{"text": self.system_prompt}]},
+                        {"role": "model", "parts": [{"text": "Entendido."}]},
+                        {"role": "user", "parts": parts}]
+
+        payload = {
+            "contents": contents,
+            "generationConfig": {
+                "temperature": self.temperature,
+                "maxOutputTokens": self.max_tokens,
+            },
+        }
+        url = f"{self.base_url}/models/{self.model}:generateContent?key={self.api_key}"
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.post(url, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"]
 
     def _stream_google(self, prompt: str, images: list = None) -> Iterator[str]:
-        raise NotImplementedError
+        parts = []
+        if images:
+            for img in images:
+                if img.startswith("data:"):
+                    mime = img.split(";")[0].split(":")[1]
+                    data_b64 = img.split(",")[1]
+                    parts.append({"inlineData": {"mimeType": mime, "data": data_b64}})
+        parts.append({"text": prompt})
+
+        payload = {
+            "contents": [{"parts": parts}],
+            "generationConfig": {
+                "temperature": self.temperature,
+                "maxOutputTokens": self.max_tokens,
+            },
+        }
+        url = f"{self.base_url}/models/{self.model}:streamGenerateContent?key={self.api_key}&alt=sse"
+        with httpx.Client(timeout=self.timeout) as client:
+            with client.stream("POST", url, json=payload) as resp:
+                resp.raise_for_status()
+                for line in resp.iter_lines():
+                    if not line or not line.startswith("data: "):
+                        continue
+                    try:
+                        chunk = json.loads(line[6:])
+                        text = chunk["candidates"][0]["content"]["parts"][0].get("text", "")
+                        if text:
+                            yield text
+                    except Exception:
+                        continue
+
+    # ── Ollama ───────────────────────────────────────────────────────────────
 
     def _complete_ollama(self, prompt: str, images: list = None) -> str:
-        raise NotImplementedError
+        payload = {
+            "model": self.model,
+            "prompt": f"{self.system_prompt}\n\n{prompt}" if self.system_prompt else prompt,
+            "stream": False,
+            "options": {"temperature": self.temperature, "num_predict": self.max_tokens},
+        }
+        if images:
+            b64_images = []
+            for img in images:
+                if img.startswith("data:"):
+                    b64_images.append(img.split(",")[1])
+            if b64_images:
+                payload["images"] = b64_images
+
+        url = f"{self.base_url}/api/generate"
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.post(url, json=payload)
+            resp.raise_for_status()
+            return resp.json()["response"]

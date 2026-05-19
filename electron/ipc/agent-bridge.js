@@ -1,4 +1,5 @@
 const { spawn } = require('child_process');
+const { app } = require('electron');
 const path = require('path');
 
 module.exports = function registerAgentHandlers(ipcMain, initialWindow, getWindow) {
@@ -18,11 +19,20 @@ module.exports = function registerAgentHandlers(ipcMain, initialWindow, getWindo
       agentProcess = null;
     }
 
-    const agentPath = path.join(__dirname, '../../agent/main_agent.py');
+    // Em produção os .py ficam em resources/agent/ (extraResources no electron-builder.yml).
+    // Em desenvolvimento ficam em ../../agent/ relativo a este arquivo.
+    const agentPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'agent', 'main_agent.py')
+      : path.join(__dirname, '../../agent/main_agent.py');
+
     const pythonBin = process.platform === 'win32' ? 'python' : 'python3';
+
+    const agentDir = path.dirname(agentPath);
 
     agentProcess = spawn(pythonBin, [agentPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: agentDir,
+      env: { ...process.env, PYTHONPATH: agentDir },
     });
 
     agentProcess.stdin.write(JSON.stringify(config) + '\n');

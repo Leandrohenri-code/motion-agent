@@ -46,84 +46,190 @@ export function ReferenceTab() {
   };
 
   const handleAnalyze = async () => {
-    updateReference({ isAnalyzing: true });
-    const apiKey = await window.electronAPI?.loadApiKey(api.provider) || api.apiKey;
+    updateReference({ isAnalyzing: true, analyzeError: '' });
+    const apiKey = await window.electronAPI?.loadApiKey(api.provider).catch(() => null) || api.apiKey;
 
-    // Simulate step progression
+    // Step animation
     for (let i = 0; i < ANALYZE_STEPS.length; i++) {
       setAnalyzeStep(i);
-      await new Promise((r) => setTimeout(r, 800 + Math.random() * 400));
+      await new Promise((r) => setTimeout(r, 700 + Math.random() * 300));
     }
 
-    // Build analysis prompt
-    const messages = [];
-    const contentParts = [];
+    const ANALYSIS_INSTRUCTION = `Analise as informações de referência fornecidas (descrição e/ou imagens de mood board). Gere:
+1. Características detectadas: estilo, tipografia, ritmo, transições, fundo, mood
+2. Paleta de 6 cores dominantes em hexadecimal
+3. Prompt detalhado em português para guiar a criação de um vídeo motion graphics com esse estilo
 
-    if (reference.manualDescription) {
-      contentParts.push({ type: 'text', text: `Descrição manual do estilo: ${reference.manualDescription}` });
-    }
-
-    // Add style images as vision
-    for (const img of reference.styleImages.slice(0, 5)) {
-      const base64 = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (e) => resolve(e.target.result);
-        reader.readAsDataURL(img.file);
-      });
-      contentParts.push({ type: 'image_url', image_url: { url: base64 } });
-    }
-
-    contentParts.push({
-      type: 'text',
-      text: `Analise as imagens de referência e/ou descrição fornecidas. Gere:
-1. Uma lista de características detectadas (estilo, tipografia, ritmo, transições, fundo, mood)
-2. Uma paleta de 6 cores dominantes (em hexadecimal)
-3. Um prompt detalhado em português para guiar a criação de um vídeo motion graphics com esse estilo.
-
-Responda APENAS em JSON com este formato:
+Responda SOMENTE em JSON válido com este formato exato:
 {
   "characteristics": { "style": "...", "typography": "...", "rhythm": "...", "transitions": "...", "background": "...", "mood": "..." },
   "palette": ["#hex1","#hex2","#hex3","#hex4","#hex5","#hex6"],
-  "prompt": "..."
-}`,
-    });
+  "prompt": "prompt detalhado aqui..."
+}`;
+
+    // Monta partes de conteúdo
+    const textParts = [];
+    if (reference.videoPath) {
+      textParts.push(`Vídeo de referência: ${reference.videoPath}`);
+    }
+    if (reference.manualDescription) {
+      textParts.push(`Descrição manual do estilo: ${reference.manualDescription}`);
+    }
+    textParts.push(ANALYSIS_INSTRUCTION);
+
+    // Converte imagens de estilo para base64
+    const imageBase64List = [];
+    for (const img of reference.styleImages.slice(0, 5)) {
+      if (img.file) {
+        try {
+          const b64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(img.file);
+          });
+          imageBase64List.push(b64);
+        } catch { /* pula imagem com erro */ }
+      } else if (img.url) {
+        imageBase64List.push(img.url);
+      }
+    }
 
     try {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model: api.visionModel || 'gpt-4o-mini',
-          messages: [{ role: 'user', content: contentParts }],
-          max_tokens: 1000,
-          response_format: { type: 'json_object' },
-        }),
-      });
+      let analysisText = '';
 
-      if (res.ok) {
+      if (api.provider === 'anthropic') {
+        // ── Anthropic SDK format ──
+        const contentBlocks = [];
+        for (const b64 of imageBase64List) {
+          const mediaType = b64.startsWith('data:image/png') ? 'image/png' : 'image/jpeg';
+          const data = b64.split(',')[1];
+          contentBlocks.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data } });
+        }
+        contentBlocks.push({ type: 'text', text: textParts.join('\n\n') });
+
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model: api.visionModel || api.selectedModel || 'claude-3-5-haiku-20241022',
+            max_tokens: 1500,
+            messages: [{ role: 'user', content: contentBlocks }],
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error?.message || `Erro ${res.status}`);
+        }
         const data = await res.json();
-        const analysis = JSON.parse(data.choices?.[0]?.message?.content || '{}');
-        updateReference({ analysis, isAnalyzing: false });
-        if (analysis.prompt) setSuggestedPrompt(analysis.prompt);
+        analysisText = data.content?.[0]?.text || '';
+
+      } else if (api.provider === 'google') {
+        // ── Google Gemini format ──
+        const parts = [];
+        for (const b64 of imageBase64List) {
+          const mimeType = b64.startsWith('data:image/png') ? 'image/png' : 'image/jpeg';
+          const data = b64.split(',')[1];
+          parts.push({ inlineData: { mimeType, data } });
+        }
+        parts.push({ text: textParts.join('\n\n') });
+
+        const model = api.visionModel || api.selectedModel || 'gemini-1.5-flash';
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts }] }),
+          }
+        );
+        if (!res.ok) throw new Error(`Erro ${res.status}`);
+        const data = await res.json();
+        analysisText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
       } else {
-        updateReference({ isAnalyzing: false });
+        // ── OpenAI-compatible format (OpenAI, Groq, Together, OpenRouter, etc.) ──
+        const PROVIDER_URLS = {
+          openai:     'https://api.openai.com/v1',
+          groq:       'https://api.groq.com/openai/v1',
+          together:   'https://api.together.ai/v1',
+          openrouter: 'https://openrouter.ai/api/v1',
+          mistral:    'https://api.mistral.ai/v1',
+          deepseek:   'https://api.deepseek.com/v1',
+          xai:        'https://api.x.ai/v1',
+          fireworks:  'https://api.fireworks.ai/inference/v1',
+          anyscale:   'https://api.endpoints.anyscale.com/v1',
+          perplexity: 'https://api.perplexity.ai',
+          ollama:     api.baseUrl || 'http://localhost:11434/v1',
+          lmstudio:   api.baseUrl || 'http://localhost:1234/v1',
+        };
+        const baseUrl = api.baseUrl || PROVIDER_URLS[api.provider] || `https://api.${api.provider}.com/v1`;
+
+        const contentParts = [];
+        for (const b64 of imageBase64List) {
+          contentParts.push({ type: 'image_url', image_url: { url: b64 } });
+        }
+        contentParts.push({ type: 'text', text: textParts.join('\n\n') });
+
+        const body = {
+          model: api.visionModel || api.selectedModel || 'gpt-4o-mini',
+          messages: [{ role: 'user', content: contentParts.length === 1 ? textParts.join('\n\n') : contentParts }],
+          max_tokens: 1500,
+        };
+        // json_object só para OpenAI/Groq que suportam
+        if (['openai', 'groq'].includes(api.provider)) {
+          body.response_format = { type: 'json_object' };
+        }
+
+        const res = await fetch(`${baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error?.message || `Erro ${res.status} — verifique sua API key`);
+        }
+        const data = await res.json();
+        analysisText = data.choices?.[0]?.message?.content || '';
       }
-    } catch {
-      // Demo/fallback analysis
-      const fallback = {
-        characteristics: {
-          style: 'Moderno, minimalista',
-          typography: 'Sans-serif pesada, bold',
-          rhythm: 'Médio (cortes ~2s)',
-          transitions: 'Fade suave + slide',
-          background: 'Sólido escuro',
-          mood: 'Profissional, sofisticado',
-        },
-        palette: ['#6c63ff', '#00d4aa', '#1a1a1e', '#f0f0f2', '#ff4d6d', '#ffb340'],
-        prompt: 'Crie um vídeo motion graphics profissional com estilo moderno e minimalista. Use tipografia bold sans-serif com animações de entrada suaves. Paleta escura com acentos em violeta elétrico e teal vibrante. Transições em fade com slides sutis. Ritmo médio, cortes a cada 2-3 segundos. Tom profissional e sofisticado.',
-      };
-      updateReference({ analysis: fallback, isAnalyzing: false });
-      setSuggestedPrompt(fallback.prompt);
+
+      // Extrai JSON da resposta (tolera markdown code block)
+      const jsonMatch = analysisText.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, analysisText];
+      const jsonText = (jsonMatch[1] || analysisText).trim();
+      const analysis = JSON.parse(jsonText);
+
+      if (!analysis.prompt) throw new Error('Resposta sem campo "prompt"');
+
+      updateReference({ analysis, isAnalyzing: false, analyzeError: '' });
+      setSuggestedPrompt(analysis.prompt);
+
+    } catch (err) {
+      const errorMsg = err.message || 'Erro desconhecido';
+      // Se não há chave configurada ou a análise falha, usa fallback descritivo baseado no texto manual
+      if (reference.manualDescription || reference.videoPath) {
+        const desc = reference.manualDescription || 'estilo moderno e profissional';
+        const fallback = {
+          characteristics: {
+            style: 'Moderno e profissional',
+            typography: 'Sans-serif, clean e bold',
+            rhythm: 'Médio (cortes ~2-3s)',
+            transitions: 'Fade suave + deslize',
+            background: 'Sólido escuro ou gradiente',
+            mood: 'Profissional e sofisticado',
+          },
+          palette: ['#6c63ff', '#00d4aa', '#1a1a1e', '#f0f0f2', '#ff4d6d', '#ffb340'],
+          prompt: `Crie um vídeo motion graphics com o seguinte estilo: ${desc}. Use tipografia clean e bold com animações de entrada suaves. Aplique transições em fade com deslizes sutis. Mantenha ritmo médio com cortes a cada 2-3 segundos.`,
+        };
+        updateReference({ analysis: fallback, isAnalyzing: false, analyzeError: `Análise via IA falhou (${errorMsg}) — prompt gerado com base na descrição manual.` });
+        setSuggestedPrompt(fallback.prompt);
+      } else {
+        updateReference({ isAnalyzing: false, analyzeError: `Erro: ${errorMsg}` });
+      }
     }
   };
 
@@ -252,6 +358,12 @@ Responda APENAS em JSON com este formato:
               <><Search size={16} /> Analisar referências</>
             )}
           </button>
+
+          {reference.analyzeError && (
+            <div style={{ padding: '8px 12px', background: '#ffb34010', borderRadius: 8, border: '1px solid #ffb34030', fontSize: 11, color: '#ffb340', lineHeight: 1.5 }}>
+              ⚠️ {reference.analyzeError}
+            </div>
+          )}
         </div>
 
         {/* RIGHT COLUMN — Results */}

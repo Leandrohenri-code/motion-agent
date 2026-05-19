@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { Play, ExternalLink } from 'lucide-react';
+import React, { useEffect, useState, useRef } from 'react';
+import { Play, ExternalLink, Wifi, WifiOff, RefreshCw } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import { FolderInput } from '../shared/FolderInput';
 import { Badge } from '../shared/Badge';
@@ -36,7 +36,11 @@ function Toggle({ label, description, checked, onChange }) {
 
 export function ProjectTab() {
   const { project, updateProject, agent, frames } = useAppStore();
+  const [studioOnline, setStudioOnline] = useState(false);
+  const [startingStudio, setStartingStudio] = useState(false);
+  const pingRef = useRef(null);
 
+  // Detecta Remotion quando a pasta muda
   useEffect(() => {
     if (project.remotionPath) {
       window.electronAPI?.detectRemotion(project.remotionPath).then((found) => {
@@ -44,6 +48,27 @@ export function ProjectTab() {
       });
     }
   }, [project.remotionPath]);
+
+  // Polling do servidor Remotion (a cada 3s)
+  useEffect(() => {
+    const check = () => {
+      window.electronAPI?.checkRemotionServer?.().then((r) => setStudioOnline(r?.online || false));
+    };
+    check();
+    pingRef.current = setInterval(check, 3000);
+    return () => clearInterval(pingRef.current);
+  }, []);
+
+  const handleStartStudio = async () => {
+    if (!project.remotionPath) return;
+    setStartingStudio(true);
+    await window.electronAPI?.startRemotionStudio(project.remotionPath);
+    // Aguarda 4s para o servidor subir e abre o browser
+    setTimeout(() => {
+      window.electronAPI?.openExternal('http://localhost:3333');
+      setStartingStudio(false);
+    }, 4000);
+  };
 
   const handleStart = async () => {
     const { api, script, reference } = useAppStore.getState();
@@ -104,7 +129,8 @@ export function ProjectTab() {
               accept={['tsx', 'ts', 'js']}
               hint="Arquivo principal do projeto (index.ts ou Root.tsx)"
             />
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              {/* Status do projeto */}
               {project.remotionPath ? (
                 <Badge variant={project.remotionDetected ? 'success' : 'warning'} dot>
                   {project.remotionDetected ? '✓ Remotion detectado' : '⚠ Remotion não encontrado'}
@@ -112,9 +138,39 @@ export function ProjectTab() {
               ) : (
                 <span style={{ fontSize: 12, color: '#44444e' }}>Selecione a pasta do projeto</span>
               )}
-              <button className="btn btn-secondary btn-sm" onClick={handleOpenStudio} disabled={!project.remotionPath}>
-                <ExternalLink size={13} /> Abrir Remotion Studio
-              </button>
+
+              {/* Status do Studio server */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                padding: '3px 8px', borderRadius: 999,
+                background: studioOnline ? '#00d4aa15' : '#ff4d6d10',
+                border: `1px solid ${studioOnline ? '#00d4aa40' : '#ff4d6d30'}`,
+                fontSize: 11, fontWeight: 500,
+                color: studioOnline ? '#00d4aa' : '#ff4d6d',
+              }}>
+                {studioOnline ? <Wifi size={11} /> : <WifiOff size={11} />}
+                Studio {studioOnline ? 'Online' : 'Offline'}
+              </div>
+
+              <div style={{ flex: 1 }} />
+
+              {/* Botão de iniciar studio */}
+              {!studioOnline ? (
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={handleStartStudio}
+                  disabled={!project.remotionPath || startingStudio}
+                  style={{ gap: 5 }}
+                >
+                  {startingStudio
+                    ? <><RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} /> Iniciando...</>
+                    : <><Play size={12} /> Iniciar Studio</>}
+                </button>
+              ) : (
+                <button className="btn btn-secondary btn-sm" onClick={() => window.electronAPI?.openExternal('http://localhost:3333')} disabled={!project.remotionPath}>
+                  <ExternalLink size={13} /> Abrir no browser
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -160,6 +216,34 @@ export function ProjectTab() {
         <div className="section-title">Comportamento do agente</div>
         <div className="card">
           <div className="card-body" style={{ display: 'flex', flexDirection: 'column' }}>
+            {/* Locked Reference Mode — destaque visual */}
+            <div style={{
+              background: project.lockedReferenceMode
+                ? 'linear-gradient(135deg, #6c63ff12, #00d4aa08)'
+                : 'transparent',
+              borderRadius: 8,
+              border: project.lockedReferenceMode ? '1px solid #6c63ff28' : '1px solid transparent',
+              transition: 'all 0.2s ease',
+              margin: '0 -4px',
+              padding: '0 4px',
+            }}>
+              <Toggle
+                label={
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    🔒 Locked Reference Mode
+                    {project.lockedReferenceMode && (
+                      <span style={{ fontSize: 10, fontWeight: 700, color: '#6c63ff', background: '#6c63ff20', borderRadius: 4, padding: '1px 6px', letterSpacing: 0.3 }}>
+                        ATIVO
+                      </span>
+                    )}
+                  </span>
+                }
+                description="Preserva composição dos frames — agente só anima, não recria"
+                checked={project.lockedReferenceMode}
+                onChange={(v) => updateProject({ lockedReferenceMode: v })}
+              />
+            </div>
+            <div style={{ borderTop: '1px solid #22222c' }} />
             <Toggle
               label="Modo passo a passo"
               description="Pausa após cada cena para aprovação manual — recomendado"

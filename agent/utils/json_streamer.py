@@ -1,10 +1,15 @@
 import sys
 import json
+import io
+
+# Força UTF-8 no stdout — Windows usa cp1252 por padrão e quebra com emojis/acentos
+if hasattr(sys.stdout, 'buffer'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 
 
 def send(msg: dict):
     """Send a JSON message to Electron via stdout."""
-    print(json.dumps(msg, ensure_ascii=False), flush=True)
+    print(json.dumps(msg, ensure_ascii=True), flush=True)
 
 
 def log(message: str, level: str = "info", scene: int = None):
